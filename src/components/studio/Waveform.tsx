@@ -1,5 +1,5 @@
 interface WaveformProps {
-  peaks?: number[] | null;
+  peaks?: number[];
   progress?: number;
   onSeek?: (ratio: number) => void;
   color?: string;
@@ -14,7 +14,7 @@ export function Waveform({
   height = 72,
 }: WaveformProps) {
   const bars =
-    peaks && peaks.length ? peaks : Array.from({ length: 80 }, () => 0.08);
+    Array.isArray(peaks) && peaks.length ? peaks : Array.from({ length: 80 }, () => 0.08);
 
   return (
     <div

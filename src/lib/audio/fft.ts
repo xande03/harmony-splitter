@@ -1,4 +1,3 @@
-// @ts-nocheck
 /** In-place radix-2 FFT. Length must be a power of two. */
 export function fft(re: Float32Array, im: Float32Array, inverse = false) {
   const n = re.length;
@@ -7,11 +6,11 @@ export function fft(re: Float32Array, im: Float32Array, inverse = false) {
     for (; j & bit; bit >>= 1) j ^= bit;
     j ^= bit;
     if (i < j) {
-      const tr = re[i];
-      re[i] = re[j];
+      const tr = re[i] as number;
+      re[i] = re[j] as number;
       re[j] = tr;
-      const ti = im[i];
-      im[i] = im[j];
+      const ti = im[i] as number;
+      im[i] = im[j] as number;
       im[j] = ti;
     }
   }
@@ -25,10 +24,12 @@ export function fft(re: Float32Array, im: Float32Array, inverse = false) {
       let wIm = 0;
       const half = len >> 1;
       for (let j = 0; j < half; j += 1) {
-        const uRe = re[i + j];
-        const uIm = im[i + j];
-        const vRe = re[i + j + half] * wRe - im[i + j + half] * wIm;
-        const vIm = re[i + j + half] * wIm + im[i + j + half] * wRe;
+        const uRe = re[i + j] as number;
+        const uIm = im[i + j] as number;
+        const aRe = re[i + j + half] as number;
+        const aIm = im[i + j + half] as number;
+        const vRe = aRe * wRe - aIm * wIm;
+        const vIm = aRe * wIm + aIm * wRe;
         re[i + j] = uRe + vRe;
         im[i + j] = uIm + vIm;
         re[i + j + half] = uRe - vRe;
@@ -43,8 +44,8 @@ export function fft(re: Float32Array, im: Float32Array, inverse = false) {
   if (inverse) {
     const inv = 1 / n;
     for (let i = 0; i < n; i += 1) {
-      re[i] *= inv;
-      im[i] *= inv;
+      re[i] = (re[i] as number) * inv;
+      im[i] = (im[i] as number) * inv;
     }
   }
 }
