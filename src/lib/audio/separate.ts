@@ -9,6 +9,7 @@ export type SeparateProgress = (ratio: number, label: string) => void;
 const NFFT = 2048;
 const HOP = 512;
 const EPS = 1e-8;
+const GAMMA = 2.15;
 const STEMS: StemId[] = ["vocals", "bass", "drums", "guitar"];
 
 function yieldThread() {
@@ -27,11 +28,8 @@ function median3(a: number, b: number, c: number) {
 }
 
 /**
- * Spectral source separation in the browser:
- *  - mid/side (center vs wide)
- *  - light HPSS (harmonic vs percussive)
- *  - frequency priors + L/R correlation
- * Soft masks sum to 1 so soloing a stem does not leave holes.
+ * Isolation closer to karaoke/stem mixers:
+ * mid/side + harmonic/percussive + L/R coherence + Wiener-like masks.
  */
 export async function separateStems(
   mix: AudioBuffer,
@@ -47,9 +45,10 @@ export async function separateStems(
   const frames = Math.max(1, Math.floor((nSamples - NFFT) / HOP) + 1);
   const hzPerBin = sr / NFFT;
   const binHz = (hz: number) => Math.max(1, Math.min(bins - 1, Math.round(hz / hzPerBin)));
-  const bBass = binHz(180);
-  const bKick = binHz(90);
-  const bCymbal = binHz(5000);
+  const bBass = binHz(165);
+  const bKick = binHz(95);
+  const bSnare = binHz(220);
+  const bCymbal = binHz(5500);
 
   const outL: Record<StemId, Float32Array> = {
     vocals: new Float32Array(nSamples),
@@ -76,6 +75,7 @@ export async function separateStems(
   const prevMag = new Float32Array(bins);
   const prevPrevMag = new Float32Array(bins);
   const flux = new Float32Array(bins);
+  const smoothFlux = new Float32Array(bins);
 
   const masks: Record<StemId, Float32Array> = {
     vocals: new Float32Array(bins),
@@ -108,6 +108,7 @@ export async function separateStems(
       magS[k] = Math.hypot(sRe, sIm);
       const mag = magM[k] + magS[k];
       flux[k] = Math.max(0, mag - prevMag[k]);
+      smoothFlux[k] = smoothFlux[k] * 0.65 + flux[k] * 0.35;
     }
 
     for (let k = 1; k < bins - 1; k += 1) {
@@ -116,25 +117,54 @@ export async function separateStems(
       const tot = m + s + EPS;
       const midRatio = m / tot;
       const sideRatio = s / tot;
+
+      const lMag = Math.hypot(reL[k], imL[k]);
+      const rMag = Math.hypot(reR[k], imR[k]);
+      const coherence = (reL[k] * reR[k] + imL[k] * imR[k]) / (lMag * rMag + EPS);
+      const centered = Math.max(0, coherence);
+
       const hHarm = median3(prevPrevMag[k], prevMag[k], tot - EPS);
       const hPerc = median3(magM[k - 1] + magS[k - 1], tot - EPS, magM[k + 1] + magS[k + 1]);
       const perc = hPerc / (hHarm + hPerc + EPS);
       const harm = 1 - perc;
       const hz = k * hzPerBin;
-      const vocalBand = hz > 180 && hz < 4800 ? 1 : hz < 120 || hz > 7000 ? 0.05 : 0.35;
-      const bassBand = k <= bBass ? 1 : k < bBass * 1.6 ? 0.35 : 0.04;
-      const kickBand = k <= bKick ? 1 : 0.15;
-      const guitarBand = hz > 220 && hz < 6500 ? 1 : 0.12;
-      const air = k >= bCymbal ? 1 : 0.2;
-      const onset = flux[k] / (prevMag[k] + 0.08);
 
-      let v = harm * midRatio * vocalBand * (0.55 + 0.45 * midRatio);
-      let b = harm * midRatio * bassBand * 1.35;
-      let d = perc * (0.55 * kickBand + 0.7 * onset + 0.45 * air);
-      let g = harm * sideRatio * guitarBand * 1.25;
-      d += (1 - harm) * 0.35 * kickBand + midRatio * onset * 0.25;
-      g *= 0.35 + 0.65 * sideRatio;
-      v *= 0.4 + 0.6 * midRatio;
+      const vocalBand = hz > 160 && hz < 5200 ? 1 : hz < 90 || hz > 8000 ? 0.02 : 0.22;
+      const bassBand = k <= bBass ? 1 : k < bBass * 1.45 ? 0.28 : 0.02;
+      const kickBand = k <= bKick ? 1 : k < bSnare ? 0.35 : 0.08;
+      const guitarBand = hz > 200 && hz < 7000 ? 1 : 0.08;
+      const air = k >= bCymbal ? 1 : 0.12;
+      const onset = flux[k] / (prevMag[k] + 0.06);
+      const transient = Math.min(1, onset * 1.8 + smoothFlux[k] * 4);
+
+      let v =
+        harm *
+        vocalBand *
+        (0.25 + 0.75 * midRatio) *
+        (0.2 + 0.8 * centered) *
+        (1 - transient * 0.45);
+
+      let b = harm * bassBand * midRatio * (1 - Math.min(1, transient * 0.7)) * 1.55;
+
+      let d =
+        perc * (0.7 * kickBand + 0.9 * transient + 0.55 * air) +
+        (1 - harm) * 0.4 * kickBand +
+        midRatio * transient * 0.35;
+
+      let g =
+        harm *
+        guitarBand *
+        (0.15 + 0.85 * sideRatio) *
+        (0.35 + 0.65 * (1 - centered)) *
+        (1 - bassBand * 0.8);
+
+      g += harm * sideRatio * guitarBand * 0.35;
+      v *= 0.15 + 0.85 * centered * midRatio;
+
+      v = Math.max(v, 1e-6) ** GAMMA;
+      b = Math.max(b, 1e-6) ** GAMMA;
+      d = Math.max(d, 1e-6) ** GAMMA;
+      g = Math.max(g, 1e-6) ** GAMMA;
 
       const sum = v + b + d + g + EPS;
       masks.vocals[k] = v / sum;
@@ -152,12 +182,12 @@ export async function separateStems(
     for (let k = 0; k < bins; k += 1) prevMag[k] = magM[k] + magS[k];
 
     if (f % 24 === 0) {
-      onProgress?.(0.05 + (f / frames) * 0.9, "Separando faixas…");
+      onProgress?.(0.05 + (f / frames) * 0.9, "Isolando instrumentos…");
       await yieldThread();
     }
   }
 
-  onProgress?.(0.97, "Montando buffers…");
+  onProgress?.(0.97, "Montando faixas…");
   const ctx = new OfflineAudioContext(2, nSamples, sr);
   const stems = {} as StemBuffers;
   for (const id of STEMS) {
