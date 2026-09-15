@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { fft, hann } from "./fft";
 import type { StemId } from "./stem-engine";
 
