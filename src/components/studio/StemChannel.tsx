@@ -11,9 +11,9 @@ export interface StemChannelProps {
   soloed: boolean;
   muted: boolean;
   active: boolean;
-  meter: number;
-  peaks: number[];
-  progress: number;
+  meter?: number;
+  peaks?: number[];
+  progress?: number;
   onChange: (value: number) => void;
   onSolo: () => void;
   onMute: () => void;
@@ -29,9 +29,9 @@ export function StemChannel({
   soloed,
   muted,
   active,
-  meter,
-  peaks,
-  progress,
+  meter = 0,
+  peaks = [],
+  progress = 0,
   onChange,
   onSolo,
   onMute,

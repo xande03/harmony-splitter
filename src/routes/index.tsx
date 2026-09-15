@@ -450,6 +450,9 @@ function Studio() {
                     hint={STEM_META[id].hint}
                     icon={STEM_META[id].icon}
                     value={baseLevels[id]}
+                    meter={player.meters[id] ?? 0}
+                    peaks={player.stemPeaks[id] ?? []}
+                    progress={player.duration ? player.position / player.duration : 0}
                     soloed={solo.includes(id)}
                     muted={muted.includes(id)}
                     active={effectiveLevels[id] > 0}
