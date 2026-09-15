@@ -91,32 +91,36 @@ export async function separateStems(
     imR.fill(0);
     for (let i = 0; i < NFFT; i += 1) {
       const idx = start + i;
-      const w = window[i];
-      reL[i] = (idx < nSamples ? left[idx] : 0) * w;
-      reR[i] = (idx < nSamples ? right[idx] : 0) * w;
+      const w = window[i] as number;
+      reL[i] = (idx < nSamples ? (left[idx] as number) : 0) * w;
+      reR[i] = (idx < nSamples ? (right[idx] as number) : 0) * w;
     }
     fft(reL, imL, false);
     fft(reR, imR, false);
 
     for (let k = 0; k < bins; k += 1) {
-      const mRe = 0.5 * (reL[k] + reR[k]);
-      const mIm = 0.5 * (imL[k] + imR[k]);
-      const sRe = 0.5 * (reL[k] - reR[k]);
-      const sIm = 0.5 * (imL[k] - imR[k]);
+      const mRe = 0.5 * ((reL[k] as number) + (reR[k] as number));
+      const mIm = 0.5 * ((imL[k] as number) + (imR[k] as number));
+      const sRe = 0.5 * ((reL[k] as number) - (reR[k] as number));
+      const sIm = 0.5 * ((imL[k] as number) - (imR[k] as number));
       magM[k] = Math.hypot(mRe, mIm);
       magS[k] = Math.hypot(sRe, sIm);
-      const mag = magM[k] + magS[k];
-      flux[k] = Math.max(0, mag - prevMag[k]);
+      const mag = (magM[k] as number) + (magS[k] as number);
+      flux[k] = Math.max(0, mag - (prevMag[k] as number));
     }
 
     for (let k = 1; k < bins - 1; k += 1) {
-      const m = magM[k];
-      const s = magS[k];
+      const m = magM[k] as number;
+      const s = magS[k] as number;
       const tot = m + s + EPS;
       const midRatio = m / tot;
       const sideRatio = s / tot;
-      const hHarm = median3(prevPrevMag[k], prevMag[k], tot - EPS);
-      const hPerc = median3(magM[k - 1] + magS[k - 1], tot - EPS, magM[k + 1] + magS[k + 1]);
+      const hHarm = median3(prevPrevMag[k] as number, prevMag[k] as number, tot - EPS);
+      const hPerc = median3(
+        (magM[k - 1] as number) + (magS[k - 1] as number),
+        tot - EPS,
+        (magM[k + 1] as number) + (magS[k + 1] as number),
+      );
       const perc = hPerc / (hHarm + hPerc + EPS);
       const harm = 1 - perc;
       const hz = k * hzPerBin;
