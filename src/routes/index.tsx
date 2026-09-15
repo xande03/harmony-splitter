@@ -8,11 +8,9 @@ import {
   Loader2,
   Mic2,
   Music4,
-  Moon,
   Pause,
   Play,
   RotateCcw,
-  Sun,
   Trash2,
   UploadCloud,
   Waves,
@@ -22,7 +20,6 @@ import { Toaster } from "@/components/ui/sonner";
 import { StemChannel } from "@/components/studio/StemChannel";
 import { Waveform } from "@/components/studio/Waveform";
 import { useStemPlayer } from "@/hooks/use-stem-player";
-import { useTheme } from "@/hooks/use-theme";
 import {
   DEFAULT_LEVELS,
   STEM_IDS,
@@ -88,7 +85,6 @@ function formatTime(seconds: number) {
 
 function Studio() {
   const player = useStemPlayer();
-  const { theme, toggle: toggleTheme } = useTheme();
   const [tracks, setTracks] = useState<TrackMeta[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [baseLevels, setBaseLevels] = useState<StemLevels>({ ...DEFAULT_LEVELS });
@@ -245,25 +241,14 @@ function Studio() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            className="btn btn-ghost size-10 !p-0"
-            onClick={toggleTheme}
-            aria-label={theme === "dark" ? "Ativar tema claro" : "Ativar tema escuro"}
-            title={theme === "dark" ? "Tema claro" : "Tema escuro"}
-          >
-            {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
-          </button>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={() => inputRef.current?.click()}
-          >
-            <UploadCloud className="size-4" />
-            Enviar MP3
-          </button>
-        </div>
+        <button
+          type="button"
+          className="btn btn-ghost"
+          onClick={() => inputRef.current?.click()}
+        >
+          <UploadCloud className="size-4" />
+          Enviar MP3
+        </button>
       </header>
 
       <input
