@@ -468,6 +468,9 @@ function Studio() {
                     soloed={solo.includes(id)}
                     muted={muted.includes(id)}
                     active={effectiveLevels[id] > 0}
+                    meter={player.meters[id] ?? 0}
+                    peaks={player.stemPeaks[id] ?? []}
+                    progress={player.duration ? player.position / player.duration : 0}
                     onChange={(value) =>
                       setBaseLevels((prev) => ({ ...prev, [id]: value }))
                     }
