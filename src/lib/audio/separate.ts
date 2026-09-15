@@ -129,7 +129,7 @@ export async function separateStems(
       const kickBand = k <= bKick ? 1 : 0.15;
       const guitarBand = hz > 220 && hz < 6500 ? 1 : 0.12;
       const air = k >= bCymbal ? 1 : 0.2;
-      const onset = flux[k] / (prevMag[k] + 0.08);
+      const onset = (flux[k] as number) / ((prevMag[k] as number) + 0.08);
 
       let v = harm * midRatio * vocalBand * (0.55 + 0.45 * midRatio);
       let b = harm * midRatio * bassBand * 1.35;
@@ -152,7 +152,8 @@ export async function separateStems(
     }
 
     prevPrevMag.set(prevMag);
-    for (let k = 0; k < bins; k += 1) prevMag[k] = magM[k] + magS[k];
+    for (let k = 0; k < bins; k += 1)
+      prevMag[k] = (magM[k] as number) + (magS[k] as number);
 
     if (f % 24 === 0) {
       onProgress?.(0.05 + (f / frames) * 0.9, "Separando faixas…");
@@ -165,8 +166,8 @@ export async function separateStems(
   const stems = {} as StemBuffers;
   for (const id of STEMS) {
     const buf = ctx.createBuffer(2, nSamples, sr);
-    buf.copyToChannel(outL[id], 0);
-    buf.copyToChannel(outR[id], 1);
+    buf.copyToChannel(new Float32Array(outL[id]), 0);
+    buf.copyToChannel(new Float32Array(outR[id]), 1);
     stems[id] = buf;
   }
   onProgress?.(1, "Pronto");
@@ -189,20 +190,20 @@ function overlayStem(
   workRe.set(re);
   workIm.set(im);
   for (let k = 0; k < bins; k += 1) {
-    const m = mask[k];
-    workRe[k] *= m;
-    workIm[k] *= m;
+    const m = mask[k] as number;
+    workRe[k] = (workRe[k] as number) * m;
+    workIm[k] = (workIm[k] as number) * m;
     if (k > 0) {
       const mk = n - k;
-      workRe[mk] *= m;
-      workIm[mk] *= m;
+      workRe[mk] = (workRe[mk] as number) * m;
+      workIm[mk] = (workIm[mk] as number) * m;
     }
   }
   fft(workRe, workIm, true);
   for (let i = 0; i < n; i += 1) {
     const idx = start + i;
     if (idx >= nSamples) break;
-    dest[idx] += workRe[i] * window[i];
+    dest[idx] = (dest[idx] as number) + (workRe[i] as number) * (window[i] as number);
   }
 }
 
@@ -215,7 +216,7 @@ export function mixPeaks(buffer: AudioBuffer, buckets = 280): number[] {
     const start = i * size;
     const end = Math.min(data.length, start + size);
     for (let j = start; j < end; j += 1) {
-      const v = Math.abs(data[j]);
+      const v = Math.abs(data[j] as number);
       if (v > max) max = v;
     }
     peaks.push(max);
