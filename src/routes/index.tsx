@@ -18,6 +18,7 @@ import {
 import { toast } from "sonner";
 import { Toaster } from "@/components/ui/sonner";
 import { StemChannel } from "@/components/studio/StemChannel";
+import { Waveform } from "@/components/studio/Waveform";
 import { useStemPlayer } from "@/hooks/use-stem-player";
 import {
   DEFAULT_LEVELS,
@@ -223,8 +224,6 @@ function Studio() {
     }
   }, [currentTrack, player]);
 
-  const progress = player.duration ? (player.position / player.duration) * 100 : 0;
-
   return (
     <div className="min-h-screen">
       <Toaster position="top-center" />
@@ -281,7 +280,7 @@ function Studio() {
               }}
             >
               <span className="grid size-14 place-items-center rounded-2xl bg-primary/15 text-primary">
-                {busy === "loading" ? (
+                {busy === "loading" || player.splitProgress ? (
                   <Loader2 className="size-6 animate-spin" />
                 ) : (
                   <Music4 className="size-6" />
@@ -293,6 +292,20 @@ function Studio() {
                   Solte um arquivo MP3 e ele será dividido em voz, baixo, bateria e
                   violão/guitarra para você isolar ou realçar cada parte.
                 </p>
+                {player.splitProgress && (
+                  <div className="mx-auto mt-4 w-full max-w-sm">
+                    <p className="text-xs text-primary">
+                      {player.splitProgress.label}{" "}
+                      {Math.round(player.splitProgress.ratio * 100)}%
+                    </p>
+                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full bg-primary"
+                        style={{ width: `${player.splitProgress.ratio * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
               <button
                 type="button"
@@ -312,7 +325,9 @@ function Studio() {
                   <div className="min-w-0">
                     <p className="truncate text-base font-semibold">{currentTrack.name}</p>
                     <p className="text-xs text-muted-foreground">
-                      {formatTime(player.duration)} · mix ao vivo
+                      {player.splitProgress
+                        ? `${player.splitProgress.label} ${Math.round(player.splitProgress.ratio * 100)}%`
+                        : `${formatTime(player.duration)} · separação espectral no navegador`}
                     </p>
                   </div>
                   <div className="flex gap-2">
@@ -351,6 +366,7 @@ function Studio() {
                     onClick={player.toggle}
                     className="btn btn-primary size-12 !rounded-full !p-0"
                     aria-label={player.isPlaying ? "Pausar" : "Reproduzir"}
+                    disabled={!player.ready}
                   >
                     {player.isPlaying ? (
                       <Pause className="size-5" />
@@ -359,6 +375,11 @@ function Studio() {
                     )}
                   </button>
                   <div className="flex-1">
+                    <Waveform
+                      peaks={player.peaks}
+                      progress={player.duration ? player.position / player.duration : 0}
+                      onSeek={(ratio) => player.seek(ratio * player.duration)}
+                    />
                     <input
                       type="range"
                       min={0}
@@ -366,7 +387,7 @@ function Studio() {
                       step={0.01}
                       value={player.position}
                       onChange={(e) => player.seek(Number(e.target.value))}
-                      className="master-slider w-full"
+                      className="master-slider mt-2 w-full"
                       aria-label="Posição da música"
                     />
                     <div className="mt-1 flex justify-between font-mono text-xs text-muted-foreground">
@@ -374,6 +395,13 @@ function Studio() {
                       <span>{formatTime(player.duration)}</span>
                     </div>
                   </div>
+                </div>
+
+                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full rounded-full bg-primary"
+                    style={{ width: `${Math.min(100, player.masterMeter * 100)}%` }}
+                  />
                 </div>
 
                 <div className="mt-4 flex items-center gap-3">
@@ -394,12 +422,6 @@ function Studio() {
                   </span>
                 </div>
 
-                <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full rounded-full bg-primary transition-[width] duration-100"
-                    style={{ width: `${progress}%` }}
-                  />
-                </div>
               </div>
 
               <div className="flex flex-wrap gap-2">

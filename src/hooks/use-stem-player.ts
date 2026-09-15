@@ -4,20 +4,37 @@ import {
   STEM_IDS,
   buildStemGraph,
   renderMix,
+  renderStem,
   type StemId,
   type StemLevels,
 } from "@/lib/audio/stem-engine";
+import { mixPeaks, separateStems, type StemBuffers } from "@/lib/audio/separate";
 import { audioBufferToWav } from "@/lib/audio/wav";
+
+function rmsFromAnalyser(node: AnalyserNode | null, scratch: Uint8Array) {
+  if (!node) return 0;
+  node.getByteTimeDomainData(scratch);
+  let sum = 0;
+  for (let i = 0; i < scratch.length; i += 1) {
+    const v = (scratch[i] - 128) / 128;
+    sum += v * v;
+  }
+  return Math.min(1, Math.sqrt(sum / scratch.length) * 2.4);
+}
 
 export function useStemPlayer() {
   const ctxRef = useRef<AudioContext | null>(null);
-  const bufferRef = useRef<AudioBuffer | null>(null);
-  const sourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const stemsRef = useRef<StemBuffers | null>(null);
+  const mixRef = useRef<AudioBuffer | null>(null);
+  const sourcesRef = useRef<Record<StemId, AudioBufferSourceNode> | null>(null);
   const stemGainsRef = useRef<Record<StemId, GainNode> | null>(null);
+  const analysersRef = useRef<Record<StemId, AnalyserNode> | null>(null);
   const masterGainRef = useRef<GainNode | null>(null);
+  const masterAnalyserRef = useRef<AnalyserNode | null>(null);
   const startedAtRef = useRef(0);
   const offsetRef = useRef(0);
   const rafRef = useRef<number | null>(null);
+  const meterScratch = useRef(new Uint8Array(128));
 
   const [levels, setLevels] = useState<StemLevels>({ ...DEFAULT_LEVELS });
   const [master, setMaster] = useState(0.9);
@@ -25,51 +42,78 @@ export function useStemPlayer() {
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
   const [ready, setReady] = useState(false);
+  const [peaks, setPeaks] = useState<number[]>([]);
+  const [stemPeaks, setStemPeaks] = useState<Record<StemId, number[]>>({
+    vocals: [],
+    bass: [],
+    drums: [],
+    guitar: [],
+  });
+  const [meters, setMeters] = useState<Record<StemId, number>>({
+    vocals: 0,
+    bass: 0,
+    drums: 0,
+    guitar: 0,
+  });
+  const [masterMeter, setMasterMeter] = useState(0);
+  const [splitProgress, setSplitProgress] = useState<{
+    ratio: number;
+    label: string;
+  } | null>(null);
 
   const getCtx = useCallback(() => {
-    if (!ctxRef.current) {
-      ctxRef.current = new AudioContext();
-    }
+    if (!ctxRef.current) ctxRef.current = new AudioContext();
     return ctxRef.current;
   }, []);
 
   const stopSource = useCallback(() => {
-    if (sourceRef.current) {
-      try {
-        sourceRef.current.onended = null;
-        sourceRef.current.stop();
-      } catch {
-        /* already stopped */
+    if (sourcesRef.current) {
+      for (const id of STEM_IDS) {
+        try {
+          sourcesRef.current[id].onended = null;
+          sourcesRef.current[id].stop();
+        } catch {
+          /* already stopped */
+        }
+        try {
+          sourcesRef.current[id].disconnect();
+        } catch {
+          /* */
+        }
       }
-      sourceRef.current.disconnect();
-      sourceRef.current = null;
+      sourcesRef.current = null;
     }
     stemGainsRef.current = null;
+    analysersRef.current = null;
     masterGainRef.current = null;
+    masterAnalyserRef.current = null;
   }, []);
 
   const startAt = useCallback(
     (offset: number) => {
-      const buffer = bufferRef.current;
-      if (!buffer) return;
+      const stems = stemsRef.current;
+      if (!stems) return;
       const ctx = getCtx();
       void ctx.resume();
       stopSource();
 
-      const graph = buildStemGraph(ctx, buffer, { levels, master });
-      sourceRef.current = graph.source;
+      const graph = buildStemGraph(ctx, stems, { levels, master });
+      sourcesRef.current = graph.sources;
       stemGainsRef.current = graph.stemGains;
+      analysersRef.current = graph.analysers;
       masterGainRef.current = graph.masterGain;
+      masterAnalyserRef.current = graph.masterAnalyser;
 
-      const safeOffset = Math.max(0, Math.min(offset, buffer.duration - 0.05));
-      graph.source.onended = () => {
-        if (sourceRef.current === graph.source) {
+      const dur = stems.vocals.duration;
+      const safeOffset = Math.max(0, Math.min(offset, dur - 0.05));
+      graph.sources.vocals.onended = () => {
+        if (sourcesRef.current === graph.sources) {
           setIsPlaying(false);
           offsetRef.current = 0;
           setPosition(0);
         }
       };
-      graph.source.start(0, safeOffset);
+      for (const id of STEM_IDS) graph.sources[id].start(0, safeOffset);
       startedAtRef.current = ctx.currentTime - safeOffset;
       offsetRef.current = safeOffset;
       setIsPlaying(true);
@@ -79,7 +123,7 @@ export function useStemPlayer() {
 
   const pause = useCallback(() => {
     const ctx = ctxRef.current;
-    if (ctx && sourceRef.current) {
+    if (ctx && sourcesRef.current) {
       offsetRef.current = ctx.currentTime - startedAtRef.current;
     }
     stopSource();
@@ -100,22 +144,6 @@ export function useStemPlayer() {
     [isPlaying, startAt],
   );
 
-  const setStemLevel = useCallback((id: StemId, value: number) => {
-    setLevels((prev) => ({ ...prev, [id]: value }));
-    const gain = stemGainsRef.current?.[id];
-    if (gain && ctxRef.current) {
-      gain.gain.setTargetAtTime(value, ctxRef.current.currentTime, 0.02);
-    }
-  }, []);
-
-  const setMasterLevel = useCallback((value: number) => {
-    setMaster(value);
-    const gain = masterGainRef.current;
-    if (gain && ctxRef.current) {
-      gain.gain.setTargetAtTime(value, ctxRef.current.currentTime, 0.02);
-    }
-  }, []);
-
   const applyLevels = useCallback((next: StemLevels, nextMaster: number) => {
     setLevels(next);
     setMaster(nextMaster);
@@ -134,10 +162,25 @@ export function useStemPlayer() {
       setIsPlaying(false);
       offsetRef.current = 0;
       setPosition(0);
+      setPeaks([]);
       const ctx = getCtx();
+      await ctx.resume();
       const decoded = await ctx.decodeAudioData(data.slice(0));
-      bufferRef.current = decoded;
+      mixRef.current = decoded;
       setDuration(decoded.duration);
+      setPeaks(mixPeaks(decoded));
+      setSplitProgress({ ratio: 0, label: "Preparando separação…" });
+      const stems = await separateStems(decoded, (ratio, label) => {
+        setSplitProgress({ ratio, label });
+      });
+      stemsRef.current = stems;
+      setStemPeaks({
+        vocals: mixPeaks(stems.vocals, 96),
+        bass: mixPeaks(stems.bass, 96),
+        drums: mixPeaks(stems.drums, 96),
+        guitar: mixPeaks(stems.guitar, 96),
+      });
+      setSplitProgress(null);
       setReady(true);
       return decoded;
     },
@@ -146,34 +189,65 @@ export function useStemPlayer() {
 
   const unload = useCallback(() => {
     stopSource();
-    bufferRef.current = null;
+    stemsRef.current = null;
+    mixRef.current = null;
     setIsPlaying(false);
     setReady(false);
     setDuration(0);
     setPosition(0);
     offsetRef.current = 0;
+    setPeaks([]);
   }, [stopSource]);
 
-  const exportMix = useCallback(async (fileName: string) => {
-    const buffer = bufferRef.current;
-    if (!buffer) return;
-    const rendered = await renderMix(buffer, { levels, master });
-    const blob = audioBufferToWav(rendered);
+  const downloadBlob = (blob: Blob, name: string) => {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `${fileName.replace(/\.[^.]+$/, "")} - mix.wav`;
+    anchor.download = name;
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
     URL.revokeObjectURL(url);
-  }, [levels, master]);
+  };
+
+  const exportMix = useCallback(
+    async (fileName: string) => {
+      const stems = stemsRef.current;
+      if (!stems) return;
+      const rendered = await renderMix(stems, { levels, master });
+      downloadBlob(
+        audioBufferToWav(rendered),
+        `${fileName.replace(/\.[^.]+$/, "")} - mix.wav`,
+      );
+    },
+    [levels, master],
+  );
+
+  const exportStem = useCallback(async (id: StemId, fileName: string) => {
+    const stems = stemsRef.current;
+    if (!stems) return;
+    const rendered = await renderStem(stems[id], 1);
+    downloadBlob(
+      audioBufferToWav(rendered),
+      `${fileName.replace(/\.[^.]+$/, "")} - ${id}.wav`,
+    );
+  }, []);
 
   useEffect(() => {
     const tick = () => {
       const ctx = ctxRef.current;
-      if (ctx && sourceRef.current) {
+      if (ctx && sourcesRef.current) {
         setPosition(Math.min(ctx.currentTime - startedAtRef.current, duration));
+        const scratch = meterScratch.current;
+        const next = {} as Record<StemId, number>;
+        for (const id of STEM_IDS) {
+          next[id] = rmsFromAnalyser(analysersRef.current?.[id] ?? null, scratch);
+        }
+        setMeters(next);
+        setMasterMeter(rmsFromAnalyser(masterAnalyserRef.current, scratch));
+      } else {
+        setMeters({ vocals: 0, bass: 0, drums: 0, guitar: 0 });
+        setMasterMeter(0);
       }
       rafRef.current = requestAnimationFrame(tick);
     };
@@ -192,14 +266,18 @@ export function useStemPlayer() {
     position,
     duration,
     ready,
+    peaks,
+    stemPeaks,
+    meters,
+    masterMeter,
+    splitProgress,
     toggle,
     pause,
     seek,
-    setStemLevel,
-    setMasterLevel,
     applyLevels,
     loadArrayBuffer,
     unload,
     exportMix,
+    exportStem,
   };
 }

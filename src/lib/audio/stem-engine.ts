@@ -16,141 +16,81 @@ export interface GraphOptions {
   master: number;
 }
 
-interface BuiltGraph {
-  source: AudioBufferSourceNode;
+export interface BuiltGraph {
+  sources: Record<StemId, AudioBufferSourceNode>;
   stemGains: Record<StemId, GainNode>;
+  analysers: Record<StemId, AnalyserNode>;
   masterGain: GainNode;
+  masterAnalyser: AnalyserNode;
 }
 
-function chain(ctx: BaseAudioContext, input: AudioNode, nodes: AudioNode[]): AudioNode {
-  let current = input;
-  for (const node of nodes) {
-    current.connect(node);
-    current = node;
-  }
-  return current;
-}
-
-function filter(
-  ctx: BaseAudioContext,
-  type: BiquadFilterType,
-  frequency: number,
-  q = 0.9,
-  gain = 0,
-): BiquadFilterNode {
-  const node = ctx.createBiquadFilter();
-  node.type = type;
-  node.frequency.value = frequency;
-  node.Q.value = q;
-  node.gain.value = gain;
-  return node;
-}
-
-/**
- * Builds the separation graph. Works both on a live AudioContext and on an
- * OfflineAudioContext (used for the download render), so playback and export
- * always sound identical.
- */
 export function buildStemGraph(
   ctx: BaseAudioContext,
-  buffer: AudioBuffer,
+  stems: Record<StemId, AudioBuffer>,
   options: GraphOptions,
 ): BuiltGraph {
-  const source = ctx.createBufferSource();
-  source.buffer = buffer;
-
   const masterGain = ctx.createGain();
   masterGain.gain.value = options.master;
-  masterGain.connect(ctx.destination);
 
-  const isStereo = buffer.numberOfChannels > 1;
-  const splitter = ctx.createChannelSplitter(2);
-  source.connect(splitter);
-
-  // MID = (L + R) / 2 -> centered content (lead vocal, kick, bass, snare)
-  const mid = ctx.createGain();
-  const midL = ctx.createGain();
-  midL.gain.value = 0.5;
-  const midR = ctx.createGain();
-  midR.gain.value = 0.5;
-  splitter.connect(midL, 0);
-  splitter.connect(midR, isStereo ? 1 : 0);
-  midL.connect(mid);
-  midR.connect(mid);
-
-  // SIDE = (L - R) / 2 -> wide content (guitars, keys, room, backing vox)
-  const side = ctx.createGain();
-  if (isStereo) {
-    const sideL = ctx.createGain();
-    sideL.gain.value = 0.5;
-    const sideR = ctx.createGain();
-    sideR.gain.value = -0.5;
-    splitter.connect(sideL, 0);
-    splitter.connect(sideR, 1);
-    sideL.connect(side);
-    sideR.connect(side);
-  } else {
-    mid.connect(side);
-  }
+  const masterAnalyser = ctx.createAnalyser();
+  masterAnalyser.fftSize = 256;
+  masterAnalyser.smoothingTimeConstant = 0.5;
+  masterGain.connect(masterAnalyser);
+  masterAnalyser.connect(ctx.destination);
 
   const stemGains = {} as Record<StemId, GainNode>;
+  const sources = {} as Record<StemId, AudioBufferSourceNode>;
+  const analysers = {} as Record<StemId, AnalyserNode>;
+
   for (const id of STEM_IDS) {
+    const source = ctx.createBufferSource();
+    source.buffer = stems[id];
     const gain = ctx.createGain();
     gain.gain.value = options.levels[id];
-    gain.connect(masterGain);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.45;
+    source.connect(gain);
+    gain.connect(analyser);
+    analyser.connect(masterGain);
+    sources[id] = source;
     stemGains[id] = gain;
+    analysers[id] = analyser;
   }
 
-  // Voz: centro, faixa vocal, presença realçada
-  chain(ctx, mid, [
-    filter(ctx, "highpass", 190, 0.8),
-    filter(ctx, "lowpass", 6200, 0.7),
-    filter(ctx, "peaking", 2600, 1.1, 5),
-    filter(ctx, "peaking", 420, 1.4, -4),
-    stemGains.vocals,
-  ]);
-
-  // Baixo: sub e graves centrados
-  chain(ctx, mid, [
-    filter(ctx, "lowpass", 180, 0.7),
-    filter(ctx, "lowpass", 180, 0.7),
-    filter(ctx, "highpass", 32, 0.7),
-    stemGains.bass,
-  ]);
-
-  // Bateria: bumbo (banda grave estreita) + caixa/pratos (agudos)
-  chain(ctx, mid, [
-    filter(ctx, "bandpass", 85, 1.6),
-    filter(ctx, "bandpass", 85, 1.6),
-    stemGains.drums,
-  ]);
-  chain(ctx, mid, [
-    filter(ctx, "highpass", 3600, 0.7),
-    filter(ctx, "peaking", 7000, 1.0, 4),
-    stemGains.drums,
-  ]);
-
-  // Violão / guitarra: conteúdo estéreo lateral na faixa média
-  chain(ctx, side, [
-    filter(ctx, "highpass", 230, 0.8),
-    filter(ctx, "lowpass", 5400, 0.7),
-    filter(ctx, "peaking", 1400, 1.0, 4),
-    stemGains.guitar,
-  ]);
-
-  return { source, stemGains, masterGain };
+  return { sources, stemGains, analysers, masterGain, masterAnalyser };
 }
 
 export async function renderMix(
-  buffer: AudioBuffer,
+  stems: Record<StemId, AudioBuffer>,
   options: GraphOptions,
+): Promise<AudioBuffer> {
+  const any = stems.vocals;
+  const offline = new OfflineAudioContext(
+    2,
+    Math.ceil(any.duration * any.sampleRate),
+    any.sampleRate,
+  );
+  const { sources } = buildStemGraph(offline, stems, options);
+  for (const id of STEM_IDS) sources[id].start(0);
+  return offline.startRendering();
+}
+
+export async function renderStem(
+  buffer: AudioBuffer,
+  gain = 1,
 ): Promise<AudioBuffer> {
   const offline = new OfflineAudioContext(
     2,
-    Math.ceil(buffer.duration * buffer.sampleRate),
+    buffer.length,
     buffer.sampleRate,
   );
-  const { source } = buildStemGraph(offline, buffer, options);
+  const source = offline.createBufferSource();
+  source.buffer = buffer;
+  const g = offline.createGain();
+  g.gain.value = gain;
+  source.connect(g);
+  g.connect(offline.destination);
   source.start(0);
   return offline.startRendering();
 }

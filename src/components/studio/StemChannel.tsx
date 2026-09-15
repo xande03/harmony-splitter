@@ -1,5 +1,6 @@
-import { Headphones, VolumeX } from "lucide-react";
+import { Download, Headphones, VolumeX } from "lucide-react";
 import type { StemId } from "@/lib/audio/stem-engine";
+import { Waveform } from "./Waveform";
 
 export interface StemChannelProps {
   id: StemId;
@@ -10,9 +11,13 @@ export interface StemChannelProps {
   soloed: boolean;
   muted: boolean;
   active: boolean;
+  meter: number;
+  peaks: number[];
+  progress: number;
   onChange: (value: number) => void;
   onSolo: () => void;
   onMute: () => void;
+  onExport?: () => void;
 }
 
 export function StemChannel({
@@ -24,9 +29,13 @@ export function StemChannel({
   soloed,
   muted,
   active,
+  meter,
+  peaks,
+  progress,
   onChange,
   onSolo,
   onMute,
+  onExport,
 }: StemChannelProps) {
   const percent = Math.round(value * 100);
 
@@ -67,10 +76,23 @@ export function StemChannel({
           >
             <VolumeX className="size-3.5" />
           </button>
+          {onExport && (
+            <button
+              type="button"
+              onClick={onExport}
+              className="chip"
+              aria-label={`Baixar ${label}`}
+              title="Baixar faixa"
+            >
+              <Download className="size-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
-      <div className="mt-4 flex items-center gap-3">
+      <Waveform peaks={peaks} progress={progress} height={44} color="var(--stem)" />
+
+      <div className="mt-3 flex items-center gap-3">
         <input
           type="range"
           min={0}
@@ -86,7 +108,7 @@ export function StemChannel({
       </div>
 
       <div className="stem-meter" aria-hidden>
-        <span style={{ width: `${Math.min(100, percent / 1.5)}%` }} />
+        <span style={{ width: `${Math.min(100, meter * 100)}%` }} />
       </div>
     </div>
   );

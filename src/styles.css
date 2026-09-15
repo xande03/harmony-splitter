@@ -277,4 +277,27 @@
     border-color: var(--color-primary);
     background-color: color-mix(in oklch, var(--color-primary) 10%, transparent);
   }
+
+  .waveform {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+  }
+  .waveform-track {
+    display: flex;
+    align-items: center;
+    gap: 1.5px;
+    width: 100%;
+    height: 100%;
+  }
+  .waveform-bar {
+    flex: 1;
+    min-width: 1px;
+    border-radius: 99px;
+    opacity: 0.28;
+    transition: opacity 0.12s ease;
+  }
+  .waveform-bar[data-played="true"] {
+    opacity: 0.95;
+  }
 }
