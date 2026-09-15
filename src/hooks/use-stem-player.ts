@@ -11,12 +11,12 @@ import {
 import { mixPeaks, separateStems, type StemBuffers } from "@/lib/audio/separate";
 import { audioBufferToWav } from "@/lib/audio/wav";
 
-function rmsFromAnalyser(node: AnalyserNode | null, scratch: Uint8Array<ArrayBuffer>) {
+function rmsFromAnalyser(node: AnalyserNode | null, scratch: Uint8Array) {
   if (!node) return 0;
   node.getByteTimeDomainData(scratch);
   let sum = 0;
   for (let i = 0; i < scratch.length; i += 1) {
-    const v = ((scratch[i] ?? 128) - 128) / 128;
+    const v = (scratch[i] - 128) / 128;
     sum += v * v;
   }
   return Math.min(1, Math.sqrt(sum / scratch.length) * 2.4);

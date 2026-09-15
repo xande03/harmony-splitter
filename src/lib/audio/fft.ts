@@ -1,4 +1,3 @@
-// @ts-nocheck
 /** In-place radix-2 FFT. Length must be a power of two. */
 export function fft(re: Float32Array, im: Float32Array, inverse = false) {
   const n = re.length;
